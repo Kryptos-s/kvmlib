@@ -120,7 +120,7 @@ Keep destination buffers alive until `clear()`, a successful `rebind()`, or batc
 Both APIs require root.
 
 - `EvdevInput::open(path)` opens a specific evdev device. `open_mouse()` and `open_keyboard()` search `/dev/input/by-id` and prefer Baykus devices. Use `poll()` to read events, `send_key()` or `click_mouse_button()` for buttons, and `move_relative()` for mouse movement.
-- `Cr3Trace` requires the matching custom kernel driver at `/dev/kvm_cr3trace`. Call `start()` to flush and arm it, `poll()` to read events, then `stop()`. Buffered events can be drained after stopping. A failed stop can be retried; destruction also attempts to stop the trace.
+- `Cr3Trace` requires [CatCaller's CR3-Tracer kernel patch and driver](https://github.com/CatCaller/CR3-Tracer) at `/dev/kvm_cr3trace`. Call `start()` to flush and arm it, `poll()` to read events, then `stop()`. Buffered events can be drained after stopping. A failed stop can be retried; destruction also attempts to stop the trace.
 
 The tracer takes an advisory exclusive lock and returns `Error::busy` if another cooperating client owns it. Other clients can bypass that lock and change the driver's state.
 
@@ -132,6 +132,8 @@ Fallible operations return `std::expected` with `kvmlib::Error`. Allocation fail
 
 ## Credits
 
-Credit to [CatCaller](https://github.com/CatCaller) for the original base.
+Original base: [CatCaller's KVMLib](https://github.com/CatCaller/KVMLib).
+
+CR3 tracing dependency: [CatCaller's CR3-Tracer](https://github.com/CatCaller/CR3-Tracer).
 
 The optional memory backend uses [MemProcFS](https://github.com/ufrisk/MemProcFS) by Ulf Frisk.
