@@ -310,3 +310,10 @@ extern "C" BOOL __wrap_VMMDLL_Scatter_Clear(VMMDLL_SCATTER_HANDLE, DWORD, DWORD)
     state.prepared_counts.clear();
     return true;
 }
+
+extern "C" void __wrap_VMMDLL_Scatter_CloseHandle(VMMDLL_SCATTER_HANDLE) {
+    ++state.scatter_close_count;
+    state.prepared_addresses.clear();
+    state.prepared_sizes.clear();
+    state.prepared_counts.clear();
+}
