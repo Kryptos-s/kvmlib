@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+set(KVMLib_MEMPROCFS_ENABLED @KVMLIB_ENABLE_MEMPROCFS@)
+
+if(KVMLib_MEMPROCFS_ENABLED AND NOT TARGET KVMLib::MemProcFS)
+    find_file(KVMLib_MEMPROCFS_LIBRARY
+        NAMES vmm.so
+        HINTS "${MEMPROCFS_LIBRARY_DIR}"
+        PATH_SUFFIXES lib lib64)
+    if(NOT KVMLib_MEMPROCFS_LIBRARY)
+        set(KVMLib_FOUND FALSE)
+        set(KVMLib_NOT_FOUND_MESSAGE "MemProcFS vmm.so was not found; set MEMPROCFS_LIBRARY_DIR to its runtime directory")
+        return()
+    endif()
+    add_library(KVMLib::MemProcFS SHARED IMPORTED)
+    set_target_properties(KVMLib::MemProcFS PROPERTIES
+        IMPORTED_LOCATION "${KVMLib_MEMPROCFS_LIBRARY}")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/KVMLibTargets.cmake")
+check_required_components(KVMLib)
