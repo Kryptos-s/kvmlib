@@ -21,7 +21,6 @@ inline Error from_errno(const int value = errno) noexcept {
     case ESRCH:
         return Error::not_found;
     case EBUSY:
-    case EWOULDBLOCK:
         return Error::busy;
     default:
         return Error::io_error;

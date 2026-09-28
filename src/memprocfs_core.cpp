@@ -28,12 +28,12 @@ struct VmmDeleter {
 };
 using VmmPtr = std::unique_ptr<void, VmmDeleter>;
 
-std::string lowercase(const std::string_view text) {
-    std::string result(text);
-    std::ranges::transform(result, result.begin(), [](const unsigned char value) {
-        return static_cast<char>(std::tolower(value));
-    });
-    return result;
+bool equal_case_insensitive(const std::string_view left, const std::string_view right) noexcept {
+    return left.size() == right.size() && std::ranges::equal(left, right,
+        [](const char lhs, const char rhs) {
+            return std::tolower(static_cast<unsigned char>(lhs))
+                == std::tolower(static_cast<unsigned char>(rhs));
+        });
 }
 
 std::expected<std::uint32_t, Error> parse_pid(const std::string_view text) {
@@ -159,7 +159,9 @@ bool MemProcFs::available() noexcept {
 
 std::expected<MemProcFs, Error> MemProcFs::open(const MemProcFsOptions& options) {
     if (const auto root = require_root(); !root) return std::unexpected(root.error());
-    if (options.device.empty()) return std::unexpected(Error::invalid_argument);
+    if (options.device.empty() || options.device.contains('\0')) {
+        return std::unexpected(Error::invalid_argument);
+    }
 
     std::vector<std::string> arguments{"", "-device", options.device};
     if (options.disable_python) arguments.emplace_back("-disable-python");
@@ -241,15 +243,14 @@ std::expected<std::vector<ProcessInfo>, Error> MemProcFs::processes() const {
 }
 
 std::expected<std::uint32_t, Error> MemProcFs::process_id(const std::string_view name) const {
-    if (!detail::session_ready(session_) || name.empty()) {
+    if (!detail::session_ready(session_) || name.empty() || name.contains('\0')) {
         return std::unexpected(Error::invalid_argument);
     }
-    const auto wanted = lowercase(name);
     const auto list = processes();
     if (!list) return std::unexpected(list.error());
     std::optional<std::uint32_t> match;
     for (const auto& process : *list) {
-        if (process.process_id == 0 || lowercase(process.name) != wanted) continue;
+        if (process.process_id == 0 || !equal_case_insensitive(process.name, name)) continue;
         if (match) return std::unexpected(Error::invalid_argument);
         match = process.process_id;
     }
@@ -260,11 +261,11 @@ std::expected<std::uint32_t, Error> MemProcFs::process_id(const std::string_view
 std::expected<void, Error> MemProcFs::force_process_dtb(
     const std::uint32_t process_id,
     const std::uint64_t dtb) const {
-    if (!detail::session_ready(session_) || process_id == 0 || dtb == 0) {
+    const auto aligned = dtb & ~std::uint64_t{0xFFF};
+    if (!detail::session_ready(session_) || process_id == 0 || aligned == 0) {
         return std::unexpected(Error::invalid_argument);
     }
     const auto option = VMMDLL_OPT_PROCESS_DTB | process_id;
-    const auto aligned = dtb & ~std::uint64_t{0xFFF};
     return VMMDLL_ConfigSet(session_->handle, option, aligned)
         ? std::expected<void, Error>{} : std::unexpected(Error::io_error);
 }
@@ -312,12 +313,14 @@ std::expected<std::vector<ModuleInfo>, Error> MemProcFs::modules(const std::uint
 std::expected<std::vector<ExportInfo>, Error> MemProcFs::exports(
     const std::uint32_t process_id,
     const std::string_view module) const {
-    if (!detail::session_ready(session_) || process_id == 0 || module.empty()) {
+    if (!detail::session_ready(session_) || process_id == 0 || module.empty()
+        || module.contains('\0')) {
         return std::unexpected(Error::invalid_argument);
     }
     const std::string module_name(module);
     PVMMDLL_MAP_EAT native{};
-    if (!VMMDLL_Map_GetEATU(session_->handle, process_id, module_name.c_str(), &native) || !native) {
+    if (!VMMDLL_Map_GetEATU(session_->handle, process_id, module_name.c_str(), &native)
+        || !native) {
         return std::unexpected(Error::io_error);
     }
     detail::MemFreePtr<VMMDLL_MAP_EAT> owner(native);
@@ -408,7 +411,8 @@ std::expected<std::vector<MemoryRange>, Error> MemProcFs::memory_ranges(
 std::expected<std::uint64_t, Error> MemProcFs::module_base(
     const std::uint32_t process_id,
     const std::string_view module) const {
-    if (!detail::session_ready(session_) || process_id == 0 || module.empty()) {
+    if (!detail::session_ready(session_) || process_id == 0 || module.empty()
+        || module.contains('\0')) {
         return std::unexpected(Error::invalid_argument);
     }
     const std::string module_name(module);

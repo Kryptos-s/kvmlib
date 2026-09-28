@@ -36,6 +36,7 @@ struct State {
     DWORD process_count{};
     std::size_t mem_free_count{};
     std::size_t close_count{};
+    std::size_t config_set_count{};
     std::size_t refresh_count{};
     std::size_t read_count{};
     ULONG64 last_read_flags{};
@@ -54,7 +55,10 @@ struct State {
     bool scatter_write_fail{};
     bool scatter_initialize_fail{};
     bool scatter_prepare_fail{};
+    bool scatter_clear_fail{};
     std::string last_device;
+    ULONG64 last_config_option{};
+    ULONG64 last_config_value{};
     std::vector<QWORD> prepared_addresses;
     std::vector<DWORD> prepared_sizes;
     std::vector<PDWORD> prepared_counts;
@@ -172,7 +176,10 @@ extern "C" void __wrap_VMMDLL_Close(VMM_HANDLE) {
     ++state.close_count;
 }
 
-extern "C" BOOL __wrap_VMMDLL_ConfigSet(VMM_HANDLE, ULONG64 option, ULONG64) {
+extern "C" BOOL __wrap_VMMDLL_ConfigSet(VMM_HANDLE, ULONG64 option, ULONG64 value) {
+    ++state.config_set_count;
+    state.last_config_option = option;
+    state.last_config_value = value;
     if (option == VMMDLL_OPT_REFRESH_ALL) ++state.refresh_count;
     return true;
 }
@@ -305,6 +312,7 @@ extern "C" BOOL __wrap_VMMDLL_Scatter_ExecuteRead(VMMDLL_SCATTER_HANDLE) {
 
 extern "C" BOOL __wrap_VMMDLL_Scatter_Clear(VMMDLL_SCATTER_HANDLE, DWORD, DWORD) {
     ++state.scatter_clear_count;
+    if (state.scatter_clear_fail) return false;
     state.prepared_addresses.clear();
     state.prepared_sizes.clear();
     state.prepared_counts.clear();
@@ -324,6 +332,10 @@ int main() {
     check(backend_result.has_value(), "backend open failed");
     kvmlib::MemProcFs backend = std::move(backend_result.value());
     check(kvmlib::MemProcFs::available(), "backend should report availability");
+    const std::string embedded_device("test\0suffix", 11);
+    const auto invalid_device = kvmlib::MemProcFs::open({ .device = embedded_device });
+    check(!invalid_device && invalid_device.error() == kvmlib::Error::invalid_argument,
+        "embedded-NUL device was accepted");
 
     const auto qemu_directory = std::filesystem::temp_directory_path() / ("kvmlib-qemu-tests-" + std::to_string(static_cast<unsigned long long>(::getpid())));
     std::error_code qemu_cleanup_error;
@@ -371,11 +383,29 @@ int main() {
     check(state.last_read_flags == VMMDLL_FLAG_NOCACHE, "fresh policy did not force NOCACHE");
     const auto missing = backend.process_id("notepad");
     check(!missing && missing.error() == kvmlib::Error::not_found, "substring process lookup was accepted");
+    const std::string embedded_name("notepad.exe\0suffix", 18);
+    const auto embedded = backend.process_id(embedded_name);
+    check(!embedded && embedded.error() == kvmlib::Error::invalid_argument, "embedded-NUL process lookup was accepted");
     set_processes({ { 101, "notepad.exe" }, { 102, "NOTEPAD.EXE" } });
     const auto ambiguous = backend.process_id("Notepad.exe");
     check(!ambiguous && ambiguous.error() == kvmlib::Error::invalid_argument, "ambiguous process lookup was accepted");
 
+    reset_state();
+    check(!backend.force_process_dtb(101, 0x100) && state.config_set_count == 0,
+        "zero-aligned DTB was submitted to MemProcFS");
+    check(backend.force_process_dtb(101, 0x123456), "aligned DTB was rejected");
+    check(state.config_set_count == 1
+            && state.last_config_option == (VMMDLL_OPT_PROCESS_DTB | 101)
+            && state.last_config_value == 0x123000,
+        "DTB was not page aligned before submission");
+
     set_processes({ { 101, "target.exe" } });
+    const std::string embedded_module("target.dll\0suffix", 17);
+    const auto invalid_exports = backend.exports(101, embedded_module);
+    const auto invalid_base = backend.module_base(101, embedded_module);
+    check(!invalid_exports && invalid_exports.error() == kvmlib::Error::invalid_argument
+            && !invalid_base && invalid_base.error() == kvmlib::Error::invalid_argument,
+        "embedded-NUL module name was accepted");
     const auto maps_before = state.mem_free_count;
     check(backend.processes(), "process enumeration failed");
     check(backend.modules(101), "module enumeration failed");
@@ -444,6 +474,19 @@ int main() {
     check(batch.execute({}), "empty batch should be a no-op");
     check(batch.rebind(102), "batch process rebind failed");
     check(batch.execute(std::span{ &read_transfer, 1 }), "rebound process batch read failed");
+    auto clear_failure_batch_result = backend.read_batch(101);
+    check(clear_failure_batch_result.has_value(), "clear-failure batch creation failed");
+    auto clear_failure_batch = std::move(*clear_failure_batch_result);
+    check(clear_failure_batch.execute(std::span{ &read_transfer, 1 }), "clear-failure batch setup failed");
+    const auto close_before_clear_failure = state.scatter_close_count;
+    state.scatter_clear_fail = true;
+    const auto failed_clear = clear_failure_batch.clear();
+    state.scatter_clear_fail = false;
+    check(!failed_clear && failed_clear.error() == kvmlib::Error::io_error
+            && state.scatter_close_count == close_before_clear_failure + 1,
+        "failed scatter clear did not close the handle");
+    check(clear_failure_batch.execute(std::span{ &read_transfer, 1 }),
+        "batch did not recover after failed scatter clear");
     state.scatter_initialize_fail = true;
     read_transfer.bytes_read = 77;
     auto failed_initialize_batch_result = backend.read_batch(101);

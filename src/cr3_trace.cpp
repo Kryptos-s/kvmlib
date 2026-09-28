@@ -62,11 +62,16 @@ Cr3Trace& Cr3Trace::operator=(Cr3Trace&& other) noexcept {
 }
 
 std::expected<Cr3Trace, Error> Cr3Trace::open(std::string device) {
+    if (device.empty() || device.find('\0') != std::string::npos) {
+        return std::unexpected(Error::invalid_argument);
+    }
     if (const auto root = require_root(); !root) return std::unexpected(root.error());
     detail::UniqueFd descriptor(::open(device.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC));
     if (!descriptor) return std::unexpected(detail::from_errno());
     if (::flock(descriptor.get(), LOCK_EX | LOCK_NB) < 0) {
-        return std::unexpected(detail::from_errno());
+        const auto error = errno;
+        return std::unexpected(error == EAGAIN || error == EWOULDBLOCK
+            ? Error::busy : detail::from_errno(error));
     }
     return Cr3Trace{descriptor.release()};
 }

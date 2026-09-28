@@ -14,7 +14,6 @@
 #include <system_error>
 #include <unistd.h>
 #include <utility>
-#include <utility>
 
 namespace {
 
@@ -53,7 +52,6 @@ std::expected<std::vector<std::uint32_t>, Error> parse_cpu_list(std::string_view
 
         const auto count = static_cast<std::uint64_t>(*last) - *first + 1;
         if (count > cpus.max_size() - cpus.size()) return std::unexpected(Error::parse_error);
-        cpus.reserve(cpus.size() + static_cast<std::size_t>(count));
         for (std::uint64_t cpu = *first; cpu <= *last; ++cpu) {
             cpus.push_back(static_cast<std::uint32_t>(cpu));
         }
@@ -69,9 +67,7 @@ std::expected<std::vector<std::uint32_t>, Error> parse_cpu_list(std::string_view
 std::expected<std::string, Error> read_single_line(const std::filesystem::path& path) {
     std::ifstream stream(path);
     if (!stream) {
-        std::error_code error;
-        static_cast<void>(std::filesystem::status(path, error));
-        return std::unexpected(error ? kvmlib::detail::from_error_code(error) : Error::not_found);
+        return std::unexpected(kvmlib::detail::from_errno());
     }
     std::string value;
     if (!std::getline(stream, value)) {

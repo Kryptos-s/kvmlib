@@ -38,11 +38,11 @@ std::uint64_t pages_for(const std::uint64_t address, const std::size_t size) noe
 
 class TemporaryFile {
 public:
-    TemporaryFile(const int descriptor, std::filesystem::path path) noexcept
+    TemporaryFile(const int descriptor, std::vector<char> path) noexcept
         : descriptor_(descriptor), path_(std::move(path)) {}
     ~TemporaryFile() {
         if (descriptor_ >= 0) static_cast<void>(::close(descriptor_));
-        if (!path_.empty()) static_cast<void>(::unlink(path_.c_str()));
+        if (!path_.empty()) static_cast<void>(::unlink(path_.data()));
     }
     TemporaryFile(const TemporaryFile&) = delete;
     TemporaryFile& operator=(const TemporaryFile&) = delete;
@@ -63,7 +63,7 @@ public:
             return std::unexpected(kvmlib::detail::from_errno());
         }
         return std::expected<TemporaryFile, Error>(
-            std::in_place, descriptor, std::filesystem::path(buffer.data()));
+            std::in_place, descriptor, std::move(buffer));
     }
 
     std::expected<void, Error> write(const std::span<const std::byte> input) {
@@ -87,7 +87,7 @@ public:
         if (descriptor >= 0 && ::close(descriptor) != 0) {
             return std::unexpected(kvmlib::detail::from_errno());
         }
-        if (::rename(path_.c_str(), destination.c_str()) != 0) {
+        if (::rename(path_.data(), destination.c_str()) != 0) {
             return std::unexpected(kvmlib::detail::from_errno());
         }
         path_.clear();
@@ -96,7 +96,7 @@ public:
 
 private:
     int descriptor_{-1};
-    std::filesystem::path path_;
+    std::vector<char> path_;
 };
 
 std::expected<void, Error> validate_output(const std::filesystem::path& output) {
@@ -137,7 +137,8 @@ std::expected<void, Error> dump(
     auto file = TemporaryFile::create(output);
     if (!file) return std::unexpected(file.error());
 
-    std::vector<std::byte> buffer(1 << 20);
+    std::vector<std::byte> buffer(static_cast<std::size_t>(
+        std::min<std::uint64_t>(size, 1 << 20)));
     for (std::uint64_t offset{}; offset < size;) {
         const auto count = static_cast<std::size_t>(
             std::min<std::uint64_t>(buffer.size(), size - offset));
@@ -374,8 +375,9 @@ std::expected<void, Error> MemProcFsReadBatch::clear() {
     if (!valid()) return std::unexpected(Error::invalid_argument);
     if (scatter_ && !VMMDLL_Scatter_Clear(
         static_cast<VMMDLL_SCATTER_HANDLE>(scatter_), process_id_, session_->read_flags)) {
-        detail::ScatterPtr failed(scatter_);
-        scatter_ = nullptr;
+        {
+            detail::ScatterPtr failed(std::exchange(scatter_, nullptr));
+        }
         prepared_ = false;
         prepared_transfers_.clear();
         counts_.clear();
@@ -416,8 +418,9 @@ std::expected<void, Error> MemProcFsReadBatch::execute(
     }
 
     const auto close_and_reset = [&] {
-        detail::ScatterPtr old(scatter_);
-        scatter_ = nullptr;
+        {
+            detail::ScatterPtr old(std::exchange(scatter_, nullptr));
+        }
         prepared_ = false;
         prepared_transfers_.clear();
         counts_.clear();
@@ -477,8 +480,9 @@ std::expected<void, Error> MemProcFsReadBatch::rebind(const std::uint32_t proces
     if (!detail::session_ready(session_) || process_id == 0) {
         return std::unexpected(Error::invalid_argument);
     }
-    detail::ScatterPtr old(scatter_);
-    scatter_ = nullptr;
+    {
+        detail::ScatterPtr old(std::exchange(scatter_, nullptr));
+    }
     process_id_ = process_id;
     counts_.clear();
     prepared_transfers_.clear();

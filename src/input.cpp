@@ -160,7 +160,9 @@ EvdevInput& EvdevInput::operator=(EvdevInput&& other) noexcept {
 }
 
 std::expected<EvdevInput, Error> EvdevInput::open(std::string path) {
-    if (path.empty()) return std::unexpected(Error::invalid_argument);
+    if (path.empty() || path.find('\0') != std::string::npos) {
+        return std::unexpected(Error::invalid_argument);
+    }
     if (const auto root = require_root(); !root) return std::unexpected(root.error());
     detail::UniqueFd descriptor(::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
     if (!descriptor) return std::unexpected(detail::from_errno());

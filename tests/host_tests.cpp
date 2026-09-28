@@ -444,6 +444,30 @@ bool test_input_poll() {
     return true;
 }
 
+bool test_invalid_open_paths() {
+    reset_state();
+    std::string input_path{"mock-input"};
+    input_path.push_back('\0');
+    input_path += "suffix";
+    const auto input = kvmlib::EvdevInput::open(input_path);
+    check_error(input, kvmlib::Error::invalid_argument, "input embedded nul path");
+    check(state.open_paths.empty(), "input embedded nul no open");
+
+    reset_state();
+    std::string trace_path{"mock-trace"};
+    trace_path.push_back('\0');
+    trace_path += "suffix";
+    const auto trace = kvmlib::Cr3Trace::open(trace_path);
+    check_error(trace, kvmlib::Error::invalid_argument, "trace embedded nul path");
+    check(state.open_paths.empty(), "trace embedded nul no open");
+
+    reset_state();
+    const auto empty_trace = kvmlib::Cr3Trace::open({});
+    check_error(empty_trace, kvmlib::Error::invalid_argument, "trace empty path");
+    check(state.open_paths.empty(), "trace empty no open");
+    return true;
+}
+
 }
 
 extern "C" int __real_close(int);
@@ -591,6 +615,7 @@ int main() {
     test_input_batches();
     test_input_write_failures();
     test_input_poll();
+    test_invalid_open_paths();
     if (failures != 0) {
         std::cerr << failures << " host checks failed\n";
         return 1;

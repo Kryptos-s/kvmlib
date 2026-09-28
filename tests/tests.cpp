@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <utility>
@@ -27,6 +28,38 @@ bool check(const bool condition, const std::string_view label, int& failures) {
     ++failures;
     return false;
 }
+
+struct ScopedNoFileLimit {
+    rlimit original{};
+    bool active{true};
+
+    ~ScopedNoFileLimit() {
+        if (active) static_cast<void>(::setrlimit(RLIMIT_NOFILE, &original));
+    }
+
+    bool restore() noexcept {
+        if (!active) return true;
+        const auto result = ::setrlimit(RLIMIT_NOFILE, &original) == 0;
+        if (result) active = false;
+        return result;
+    }
+};
+
+struct ScopedDescriptors {
+    std::vector<int> values;
+
+    ~ScopedDescriptors() {
+        close_all();
+    }
+
+    void close_all() noexcept {
+        for (auto& descriptor : values) {
+            if (descriptor < 0) continue;
+            static_cast<void>(::close(descriptor));
+            descriptor = -1;
+        }
+    }
+};
 
 }
 
@@ -78,6 +111,33 @@ int main() {
         }
         check(topology->find(std::numeric_limits<std::uint32_t>::max()) == nullptr,
             "cpu_topology missing find", failures);
+    }
+
+    rlimit original_limit{};
+    if (::getrlimit(RLIMIT_NOFILE, &original_limit) == 0 && original_limit.rlim_cur > 32) {
+        rlimit constrained_limit = original_limit;
+        constrained_limit.rlim_cur = 32;
+        if (check(::setrlimit(RLIMIT_NOFILE, &constrained_limit) == 0,
+                "set file descriptor limit", failures)) {
+            ScopedNoFileLimit restore_limit{original_limit};
+            ScopedDescriptors held_descriptors;
+            held_descriptors.values.reserve(32);
+            while (true) {
+                const auto descriptor = ::dup(STDERR_FILENO);
+                if (descriptor < 0) {
+                    const auto exhausted = errno == EMFILE;
+                    check(exhausted, "exhaust file descriptors", failures);
+                    break;
+                }
+                held_descriptors.values.push_back(descriptor);
+            }
+            const auto exhausted_topology = kvmlib::cpu_topology();
+            held_descriptors.close_all();
+            check(!exhausted_topology && exhausted_topology.error() == kvmlib::Error::io_error,
+                "cpu topology open failure", failures);
+            check(restore_limit.restore(),
+                "restore file descriptor limit", failures);
+        }
     }
 
     const auto invalid_process = kvmlib::ProcessMemory::open(0);
