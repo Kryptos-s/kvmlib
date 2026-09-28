@@ -1,0 +1,23 @@
+file(READ "${KVMLIB_SOURCE_DIR}/README.md" remaining)
+set(index 0)
+while(remaining MATCHES "```cpp\n([^`]*)```")
+    set(snippet "${CMAKE_MATCH_1}")
+    set(block "${CMAKE_MATCH_0}")
+    string(FIND "${remaining}" "${block}" start)
+    string(LENGTH "${block}" length)
+    math(EXPR offset "${start} + ${length}")
+    string(SUBSTRING "${remaining}" ${offset} -1 remaining)
+    math(EXPR index "${index} + 1")
+    set(source "${KVMLIB_BINARY_DIR}/readme-example-${index}.cpp")
+    file(WRITE "${source}" "${snippet}")
+    execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -std=c++23
+        -Wall -Wextra -Wpedantic -Werror -fsyntax-only
+        "-I${KVMLIB_SOURCE_DIR}/include" "${source}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "README C++ example ${index} failed to compile: ${output}${error}")
+    endif()
+endwhile()
+if(index EQUAL 0)
+    message(FATAL_ERROR "No README C++ examples found")
+endif()
