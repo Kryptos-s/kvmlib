@@ -40,7 +40,10 @@ if(KVMLIB_ENABLE_MEMPROCFS)
     if(NOT EXISTS "${MEMPROCFS_LIBRARY_DIR}/vmm.so")
         message(FATAL_ERROR "MEMPROCFS_LIBRARY_DIR must contain vmm.so")
     endif()
-    target_sources(kvmlib PRIVATE src/memprocfs.cpp)
+    target_sources(kvmlib PRIVATE
+        src/memprocfs_core.cpp
+        src/memprocfs_memory.cpp
+    )
     target_include_directories(kvmlib SYSTEM PRIVATE "${MEMPROCFS_ROOT}/includes")
     target_compile_definitions(kvmlib PRIVATE LINUX)
     if(NOT TARGET KVMLib::MemProcFS)
@@ -75,7 +78,11 @@ if(BUILD_TESTING AND KVMLIB_BUILD_TESTS)
     add_test(NAME kvmlib-host-tests COMMAND kvmlib-host-tests)
 
     if(KVMLIB_ENABLE_MEMPROCFS)
-        add_executable(kvmlib-memprocfs-tests tests/memprocfs_tests.cpp src/memprocfs.cpp)
+        add_executable(kvmlib-memprocfs-tests
+            tests/memprocfs_tests.cpp
+            src/memprocfs_core.cpp
+            src/memprocfs_memory.cpp
+        )
         target_link_libraries(kvmlib-memprocfs-tests PRIVATE KVMLib::MemProcFS)
         target_include_directories(kvmlib-memprocfs-tests PRIVATE include)
         target_compile_features(kvmlib-memprocfs-tests PRIVATE cxx_std_23)

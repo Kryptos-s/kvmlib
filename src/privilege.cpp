@@ -9,8 +9,8 @@ bool running_as_root() noexcept {
 }
 
 std::expected<void, Error> require_root() noexcept {
-    if (!running_as_root()) return std::unexpected(Error::permission_denied);
-    return {};
+    return running_as_root() ? std::expected<void, Error>{}
+                            : std::unexpected(Error::permission_denied);
 }
 
 }
