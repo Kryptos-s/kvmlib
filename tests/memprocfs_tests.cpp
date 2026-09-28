@@ -294,3 +294,19 @@ extern "C" BOOL __wrap_VMMDLL_Scatter_PrepareEx(VMMDLL_SCATTER_HANDLE, QWORD add
     if (count) *count = 0;
     return !state.scatter_prepare_fail;
 }
+
+extern "C" BOOL __wrap_VMMDLL_Scatter_ExecuteRead(VMMDLL_SCATTER_HANDLE) {
+    ++state.scatter_execute_count;
+    for (std::size_t index{}; index < state.prepared_counts.size(); ++index) {
+        if (state.prepared_counts[index]) *state.prepared_counts[index] = state.prepared_sizes[index];
+    }
+    return true;
+}
+
+extern "C" BOOL __wrap_VMMDLL_Scatter_Clear(VMMDLL_SCATTER_HANDLE, DWORD, DWORD) {
+    ++state.scatter_clear_count;
+    state.prepared_addresses.clear();
+    state.prepared_sizes.clear();
+    state.prepared_counts.clear();
+    return true;
+}
